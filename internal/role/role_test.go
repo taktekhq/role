@@ -58,26 +58,39 @@ func TestBuild(t *testing.T) {
 	if res.Skills != 2 || res.Over {
 		t.Fatalf("bad result %+v", res)
 	}
-	sys, _ := os.ReadFile(filepath.Join(out, "a", "system.md"))
+	if filepath.Dir(res.Dir) != filepath.Join(out, "a", "builds") {
+		t.Fatalf("build dir %s", res.Dir)
+	}
+	if cur, err := filepath.EvalSymlinks(filepath.Join(out, "a", "current")); err != nil || cur != res.Dir {
+		t.Fatalf("current -> %s, %v", cur, err)
+	}
+	sys, _ := os.ReadFile(filepath.Join(res.Dir, "system.md"))
 	want := "<!-- from: s1.md -->\nONE\n\n<!-- from: s2.md -->\nTWO\n\n<!-- from: roles/a/prompt.md -->\nPROMPT A\n\n"
 	if string(sys) != want || res.Bytes != len(want) {
 		t.Fatalf("system.md = %q", sys)
 	}
-	m, _ := os.ReadFile(filepath.Join(out, "a", "plugin", ".claude-plugin", "plugin.json"))
+	m, _ := os.ReadFile(filepath.Join(res.Dir, "plugin", ".claude-plugin", "plugin.json"))
 	if !strings.Contains(string(m), `"name": "role-a"`) {
 		t.Fatalf("manifest %s", m)
 	}
-	if _, err := os.Stat(filepath.Join(out, "a", "plugin", "skills", "x", "SKILL.md")); err != nil {
+	if _, err := os.Stat(filepath.Join(res.Dir, "plugin", "skills", "x", "SKILL.md")); err != nil {
 		t.Fatal("skill symlink does not resolve:", err)
 	}
 	// Rebuild after removing a skill: stale link must go.
 	write(t, d, "roles/a/role.json", `{"description":"role a","skills":["x"]}`)
 	r, _ = b.Role("a")
-	if _, err := b.Build(r, out); err != nil {
+	res2, err := b.Build(r, out)
+	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := os.Lstat(filepath.Join(out, "a", "plugin", "skills", "y")); err == nil {
+	if res2.Dir == res.Dir {
+		t.Fatal("changed role reused the old build")
+	}
+	if _, err := os.Lstat(filepath.Join(res2.Dir, "plugin", "skills", "y")); err == nil {
 		t.Fatal("stale skill link left behind")
+	}
+	if _, err := os.Stat(filepath.Join(res.Dir, "system.md")); err != nil {
+		t.Fatal("old build removed while it may still back a running session")
 	}
 }
 
@@ -158,11 +171,11 @@ func TestUnknownConfigKey(t *testing.T) {
 func TestArgv(t *testing.T) {
 	d := fixture(t, "9000")
 	b := load(t, d)
-	st := "/state"
+	st := "/state/a/builds/h"
 	a, _ := b.Role("a")
 	got := strings.Join(b.Argv(a, st, RunOpts{Extra: []string{"-p", "hi"}}), " ")
 	want := "claude --setting-sources project,local --settings " + d + "/roles/a/settings.json" +
-		" --plugin-dir /state/a/plugin --append-system-prompt-file /state/a/system.md" +
+		" --plugin-dir /state/a/builds/h/plugin --append-system-prompt-file /state/a/builds/h/system.md" +
 		" --strict-mcp-config --mcp-config " + d + "/roles/a/mcp.json --model opus --permission-mode plan -p hi"
 	if got != want {
 		t.Fatalf("\n got %s\nwant %s", got, want)
@@ -254,5 +267,42 @@ func TestExampleBrainPasses(t *testing.T) {
 	var out bytes.Buffer
 	if err := cmdCheck([]string{"--brain", "../../example"}, &out); err != nil {
 		t.Fatalf("%v\n%s", err, out.String())
+	}
+}
+
+// Sessions started at the same moment must all get a complete build (seen 8 Nov 2026: three of seven
+// parallel `role run` calls failed while one rebuild deleted another's plugin dir).
+func TestBuildConcurrent(t *testing.T) {
+	d := fixture(t, "9000")
+	b := load(t, d)
+	r, _ := b.Role("a")
+	out := t.TempDir()
+	errs := make(chan error, 16)
+	dirs := make(chan string, 16)
+	for i := 0; i < 16; i++ {
+		go func() {
+			res, err := b.Build(r, out)
+			errs <- err
+			dirs <- res.Dir
+		}()
+	}
+	first := ""
+	for i := 0; i < 16; i++ {
+		if err := <-errs; err != nil {
+			t.Fatal(err)
+		}
+		dir := <-dirs
+		if first == "" {
+			first = dir
+		} else if dir != first {
+			t.Fatalf("same role built to two dirs: %s and %s", first, dir)
+		}
+		if _, err := os.Stat(filepath.Join(dir, "plugin", "skills", "x", "SKILL.md")); err != nil {
+			t.Fatal(err)
+		}
+	}
+	ents, _ := os.ReadDir(filepath.Join(out, "a", "builds"))
+	if len(ents) != 1 {
+		t.Fatalf("want one build, temp dirs left: %d entries", len(ents))
 	}
 }

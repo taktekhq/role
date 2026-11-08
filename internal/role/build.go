@@ -2,10 +2,14 @@ package role
 
 import (
 	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
+	"time"
 )
 
 // StateRoot is $XDG_STATE_HOME/role, default ~/.local/state/role.
@@ -20,6 +24,7 @@ func StateRoot() string {
 // Result describes one built role.
 type Result struct {
 	Role   string
+	Dir    string // the build: <out>/<role>/builds/<hash>, holding system.md and plugin/
 	Bytes  int
 	Skills int
 	Over   bool
@@ -52,7 +57,9 @@ func (b *Brain) System(r *Role) ([]byte, error) {
 	return buf.Bytes(), nil
 }
 
-// Build writes <out>/<role>/system.md and <out>/<role>/plugin/.
+// Build writes the role into <out>/<role>/builds/<hash>/ (system.md and plugin/), named by a hash of
+// its content, and points <out>/<role>/current at it. A build is never changed once written, so sessions
+// started at the same time, or a long-running session while another starts, never see a half-built role.
 func (b *Brain) Build(r *Role, out string) (Result, error) {
 	res := Result{Role: r.Name, Budget: b.Config.BudgetBytes}
 	for _, f := range []string{"settings.json", "mcp.json"} {
@@ -68,41 +75,103 @@ func (b *Brain) Build(r *Role, out string) (Result, error) {
 		return res, err
 	}
 	links := map[string]string{}
+	names := make([]string, 0, len(r.Skills))
 	for _, s := range r.Skills {
 		d, err := b.ResolveSkill(r, s)
 		if err != nil {
 			return res, err
 		}
+		if _, dup := links[s]; !dup {
+			names = append(names, s)
+		}
 		links[s] = d
 	}
-	dir := filepath.Join(out, r.Name)
-	plug := filepath.Join(dir, "plugin")
-	if err := os.RemoveAll(plug); err != nil {
-		return res, err
-	}
-	if err := os.MkdirAll(filepath.Join(plug, ".claude-plugin"), 0o755); err != nil {
-		return res, err
-	}
-	if err := os.MkdirAll(filepath.Join(plug, "skills"), 0o755); err != nil {
-		return res, err
-	}
+	sort.Strings(names)
 	manifest, _ := json.MarshalIndent(map[string]string{
 		"name": "role-" + r.Name, "version": "0.1.0", "description": r.Description,
 	}, "", "  ")
-	if err := os.WriteFile(filepath.Join(plug, ".claude-plugin", "plugin.json"), append(manifest, '\n'), 0o644); err != nil {
-		return res, err
+	manifest = append(manifest, '\n')
+
+	h := sha256.New()
+	h.Write(sys)
+	h.Write(manifest)
+	for _, s := range names {
+		fmt.Fprintf(h, "\x00%s=%s", s, links[s])
 	}
-	for s, d := range links {
-		if err := os.Symlink(d, filepath.Join(plug, "skills", s)); err != nil {
-			return res, err
-		}
-	}
-	if err := os.WriteFile(filepath.Join(dir, "system.md"), sys, 0o644); err != nil {
-		return res, err
-	}
+	id := hex.EncodeToString(h.Sum(nil))[:16]
+	base := filepath.Join(out, r.Name, "builds")
+	dir := filepath.Join(base, id)
+	res.Dir = dir
 	res.Bytes, res.Skills = len(sys), len(links)
 	res.Over = b.Config.BudgetBytes > 0 && res.Bytes > b.Config.BudgetBytes
+
+	if !exists(filepath.Join(dir, "system.md")) {
+		if err := os.MkdirAll(base, 0o755); err != nil {
+			return res, err
+		}
+		tmp, err := os.MkdirTemp(base, ".tmp-")
+		if err != nil {
+			return res, err
+		}
+		if err := writeBuild(tmp, sys, manifest, names, links); err != nil {
+			os.RemoveAll(tmp)
+			return res, err
+		}
+		if err := os.Rename(tmp, dir); err != nil {
+			os.RemoveAll(tmp)
+			if !exists(filepath.Join(dir, "system.md")) { // lost a race only if the winner finished
+				return res, err
+			}
+		}
+	}
+	// Repoint current atomically: make a uniquely named link, rename it over the old one.
+	cur := filepath.Join(out, r.Name, "current")
+	if tl, err := os.CreateTemp(filepath.Dir(cur), ".current-"); err == nil {
+		name := tl.Name()
+		tl.Close()
+		os.Remove(name)
+		if os.Symlink(filepath.Join("builds", id), name) == nil && os.Rename(name, cur) != nil {
+			os.Remove(name)
+		}
+	}
+	pruneBuilds(base, id, 30*24*time.Hour)
 	return res, nil
+}
+
+func writeBuild(dir string, sys, manifest []byte, names []string, links map[string]string) error {
+	plug := filepath.Join(dir, "plugin")
+	if err := os.MkdirAll(filepath.Join(plug, ".claude-plugin"), 0o755); err != nil {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Join(plug, "skills"), 0o755); err != nil {
+		return err
+	}
+	if err := os.WriteFile(filepath.Join(plug, ".claude-plugin", "plugin.json"), manifest, 0o644); err != nil {
+		return err
+	}
+	for _, s := range names {
+		if err := os.Symlink(links[s], filepath.Join(plug, "skills", s)); err != nil {
+			return err
+		}
+	}
+	return os.WriteFile(filepath.Join(dir, "system.md"), sys, 0o644)
+}
+
+// pruneBuilds removes builds older than age, except keep. Old builds may still back a long-running session,
+// so the age is generous; failures are ignored.
+func pruneBuilds(base, keep string, age time.Duration) {
+	ents, err := os.ReadDir(base)
+	if err != nil {
+		return
+	}
+	for _, e := range ents {
+		if e.Name() == keep {
+			continue
+		}
+		if fi, err := e.Info(); err == nil && time.Since(fi.ModTime()) > age {
+			os.RemoveAll(filepath.Join(base, e.Name()))
+		}
+	}
 }
 
 // RunOpts are the options of `role run`.
@@ -111,9 +180,8 @@ type RunOpts struct {
 	Extra []string
 }
 
-// Argv returns the command line that starts the tool in a role, built under state.
-func (b *Brain) Argv(r *Role, state string, o RunOpts) []string {
-	dir := filepath.Join(state, r.Name)
+// Argv returns the command line that starts the tool in a role from a build dir (Result.Dir).
+func (b *Brain) Argv(r *Role, dir string, o RunOpts) []string {
 	a := []string{b.Config.Tool, "--setting-sources", "project,local"}
 	if p := filepath.Join(r.Dir, "settings.json"); exists(p) {
 		a = append(a, "--settings", p)

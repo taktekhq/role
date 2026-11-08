@@ -96,7 +96,7 @@ role version
 
 All commands except `version` accept `--brain DIR`.
 
-- `build` writes `$XDG_STATE_HOME/role/<name>/` (default `~/.local/state/role/<name>/`): `system.md` (each start file, then `prompt.md`, each under a `<!-- from: path -->` marker) and `plugin/` (rebuilt from scratch each time). It prints the size of `system.md` and warns when over budget.
+- `build` writes `$XDG_STATE_HOME/role/<name>/builds/<hash>/` (default `~/.local/state/role/...`): `system.md` (each start file, then `prompt.md`, each under a `<!-- from: path -->` marker) and `plugin/`. The folder is named by a hash of its content and never changed after it is written, so many sessions can start at once and a long-running session keeps its files while you edit the role. `<name>/current` links to the newest build; builds older than 30 days are pruned. It prints the size of `system.md` and warns when over budget.
 - `check` fails on a missing file, a missing skill, invalid JSON, unknown keys or a prompt over budget, and prints a table.
 - `run` builds, then replaces itself with the tool (`syscall.Exec`), so the tool owns the terminal. `--rc` adds `--remote-control <remote_control_name, else role-NAME>`. Anything after `--` is passed through. `--dry-run` prints the command, one argument per line.
 
@@ -107,8 +107,8 @@ All commands except `version` accept `--brain DIR`.
 ```
 claude --setting-sources project,local \
        --settings <brain>/roles/reviewer/settings.json \
-       --plugin-dir ~/.local/state/role/reviewer/plugin \
-       --append-system-prompt-file ~/.local/state/role/reviewer/system.md \
+       --plugin-dir ~/.local/state/role/reviewer/builds/<hash>/plugin \
+       --append-system-prompt-file ~/.local/state/role/reviewer/builds/<hash>/system.md \
        --strict-mcp-config [--mcp-config <brain>/roles/reviewer/mcp.json] \
        [--model X] [--permission-mode Y] [--remote-control NAME] [extra args]
 ```

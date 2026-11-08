@@ -247,11 +247,11 @@ func cmdRun(args []string, out io.Writer) error {
 	if err != nil {
 		return err
 	}
-	state := StateRoot()
-	if _, err := b.Build(r, state); err != nil {
+	res, err := b.Build(r, StateRoot())
+	if err != nil {
 		return err
 	}
-	argv := b.Argv(r, state, RunOpts{RC: *rc, Extra: extra})
+	argv := b.Argv(r, res.Dir, RunOpts{RC: *rc, Extra: extra})
 	if *dry {
 		fmt.Fprintln(out, strings.Join(argv, "\n"))
 		return nil
