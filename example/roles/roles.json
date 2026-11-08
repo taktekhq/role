@@ -1,0 +1,6 @@
+{
+  "start": ["guide/memory.md", "capabilities/INDEX.md", "roles/CORE.md"],
+  "skill_paths": ["skills"],
+  "budget_bytes": 9000,
+  "tool": "claude"
+}

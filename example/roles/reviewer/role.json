@@ -1,0 +1,8 @@
+{
+  "description": "Reviews diffs, read-only",
+  "skills": ["checklist"],
+  "connectors": false,
+  "model": "",
+  "permission_mode": "plan",
+  "remote_control_name": ""
+}

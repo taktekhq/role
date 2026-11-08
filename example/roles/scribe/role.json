@@ -1,0 +1,8 @@
+{
+  "description": "Writes docs and release notes",
+  "skills": ["tone", "checklist"],
+  "connectors": true,
+  "model": "",
+  "permission_mode": "",
+  "remote_control_name": "scribe-desk"
+}
