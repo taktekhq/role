@@ -28,7 +28,7 @@ Usage:
   role run <name> [--dry-run] [--rc] [-- extra args]
   role version
 
-Every command except version takes --brain DIR (else $ROLE_BRAIN, else ~/taktekhq/brain).
+Every command except version takes --brain DIR (else $ROLE_BRAIN, else ~/.config/role/brain).
 `
 
 // Main runs the CLI and returns the exit code.

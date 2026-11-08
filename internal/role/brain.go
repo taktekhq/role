@@ -41,9 +41,7 @@ type Brain struct {
 
 // FindBrain returns the brain dir from the flag, ROLE_BRAIN, or the default places.
 func FindBrain(flagVal string) (string, error) {
-	home, _ := os.UserHomeDir()
-	cands := []string{flagVal, os.Getenv("ROLE_BRAIN"),
-		filepath.Join(home, "taktekhq/brain"), filepath.Join(home, "work/taktekhq/brain")}
+	cands := []string{flagVal, os.Getenv("ROLE_BRAIN"), defaultBrain()}
 	for i, c := range cands {
 		if c == "" {
 			continue
@@ -55,7 +53,7 @@ func FindBrain(flagVal string) (string, error) {
 			return "", fmt.Errorf("brain dir %q (from %s) is not a directory", c, []string{"--brain", "ROLE_BRAIN"}[i])
 		}
 	}
-	return "", errors.New("no brain found: pass --brain DIR, set ROLE_BRAIN, or create ~/taktekhq/brain")
+	return "", fmt.Errorf("no brain found: pass --brain DIR, set ROLE_BRAIN, or create %s (a link is fine)", defaultBrain())
 }
 
 func expandHome(p string) string {
@@ -158,4 +156,13 @@ func (b *Brain) ResolveSkill(r *Role, skill string) (string, error) {
 		}
 	}
 	return "", fmt.Errorf("role %s: skill %q not found in skill_paths %v", r.Name, skill, b.Config.SkillPaths)
+}
+
+// defaultBrain is $XDG_CONFIG_HOME/role/brain, else ~/.config/role/brain.
+func defaultBrain() string {
+	if x := os.Getenv("XDG_CONFIG_HOME"); x != "" {
+		return filepath.Join(x, "role", "brain")
+	}
+	home, _ := os.UserHomeDir()
+	return filepath.Join(home, ".config", "role", "brain")
 }

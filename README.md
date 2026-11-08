@@ -14,7 +14,7 @@ go install github.com/taktekhq/role@latest
 
 ## The brain directory
 
-`role` reads a "brain" directory. It finds it from `--brain DIR`, else `$ROLE_BRAIN`, else the first of `~/taktekhq/brain` and `~/work/taktekhq/brain`.
+`role` reads a "brain" directory. It finds it from `--brain DIR`, else `$ROLE_BRAIN`, else `$XDG_CONFIG_HOME/role/brain` (default `~/.config/role/brain`; a symlink to wherever you keep it is fine).
 
 ```
 brain/
