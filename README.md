@@ -127,3 +127,13 @@ claude --setting-sources project,local \
 ## License
 
 MIT. Copyright 2026 Taktek and Nizar Mahmoud.
+
+## Eval
+
+`role eval <name>` asks a role every question of a JSONL suite (default `<brain>/tests/recall.jsonl`) and grades each answer by pattern:
+
+```json
+{"id":"secret-get","q":"How do I get the Cloudflare token?","expect":["bin/get"],"reject":["paste it"]}
+```
+
+`expect` is any-of (all-of with `"expect_all": true`), `reject` is none-of; both are Go regexps matched case-insensitively. `--runs 3` repeats each case and reports pass@1 (share of runs) and pass^k (share of cases that passed every run). `--json FILE` keeps the results, with the first failing answer of each case. A suffix asks for short, read-only answers (`--suffix ""` turns it off). It exits non-zero when any run fails, so it can gate a change to the brain.

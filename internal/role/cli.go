@@ -26,6 +26,8 @@ Usage:
   role show <name>                 print the assembled system prompt
   role check                       build everything in a temp dir, fail on any problem
   role run <name> [--dry-run] [--rc] [-- extra args]
+  role eval <name> [--suite FILE] [--runs N] [--jobs N] [--only ids] [--json FILE]
+                                   ask the role every question of a JSONL suite, grade by pattern
   role version
 
 Every command except version takes --brain DIR (else $ROLE_BRAIN, else ~/.config/role/brain).
@@ -50,6 +52,8 @@ func Main(args []string, stdout, stderr io.Writer) int {
 		err = cmdCheck(rest, stdout)
 	case "run":
 		err = cmdRun(rest, stdout)
+	case "eval":
+		err = cmdEval(rest, stdout)
 	case "version":
 		fmt.Fprintln(stdout, "role", Version)
 	case "help", "-h", "--help":
