@@ -39,7 +39,7 @@ type CaseResult struct {
 	ID     string   `json:"id"`
 	Passes int      `json:"passes"`
 	Runs   int      `json:"runs"`
-	Fails  []string `json:"fails,omitempty"` // why each failed run failed
+	Fails  []string `json:"fails,omitempty"`  // why each failed run failed
 	Answer string   `json:"answer,omitempty"` // the first failing answer, cut to 600 bytes
 }
 
